@@ -45,6 +45,18 @@ class Settings(BaseSettings):
     dummy_user_email: str = Field(default="user@local.vmcp", description="Dummy user email")
     dummy_user_token: str = Field(default="local-token", description="Dummy authentication token")
 
+    # Authentication
+    jwt_secret_key: Optional[str] = Field(default=None, description="JWT signing secret")
+    jwt_algorithm: str = Field(default="HS256", description="JWT signing algorithm")
+    access_token_ttl_seconds: int = Field(default=900, description="Access token lifetime in seconds")
+    refresh_token_ttl_seconds: int = Field(default=604800, description="Refresh token lifetime in seconds")
+    websocket_ticket_ttl_seconds: int = Field(default=30, description="WebSocket/MCP ticket lifetime in seconds")
+    auth_cookie_secure: bool = Field(default=False, description="Force Secure auth cookies")
+    auth_cookie_domain: Optional[str] = Field(default=None, description="Optional cookie domain override")
+    allow_self_registration: bool = Field(default=True, description="Allow local username/password registration")
+    trusted_proxies: str = Field(default="127.0.0.1", description="Trusted proxy IPs/hosts or *")
+    allowed_hosts: list[str] = Field(default=["*"], description="Allowed host headers")
+
     # Storage
     storage_path: Path = Field(
         default=Path.home() / ".vmcp" / "storage",

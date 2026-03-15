@@ -66,7 +66,7 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   access_token: string;
-  refresh_token: string;
+  refresh_token?: string | null;
   token_type: string;
   expires_in: number;
   user: User;
@@ -87,6 +87,10 @@ class ApiClient {
   constructor(baseUrl: string) {
     client.setConfig({
       baseUrl: baseUrl,
+      fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, {
+        ...init,
+        credentials: 'include',
+      }),
     });
   }
 
@@ -220,6 +224,7 @@ class ApiClient {
       const response = await fetch(`${baseUrl}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(request),
       });
       if (!response.ok) {
@@ -243,6 +248,7 @@ class ApiClient {
       const response = await fetch(`${baseUrl}/api/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(request),
       });
       if (!response.ok) {
@@ -259,15 +265,16 @@ class ApiClient {
     }
   }
 
-  async getUserInfo(token: string): Promise<ApiResponse<any>> {
+  async getUserInfo(token?: string): Promise<ApiResponse<any>> {
     try {
       const configBaseUrl = client.getConfig().baseUrl || 'http://localhost:8000';
       const baseUrl = configBaseUrl.endsWith('/') ? configBaseUrl.slice(0, -1) : configBaseUrl;
       const response = await fetch(`${baseUrl}/api/userinfo`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          ...(token && { 'Authorization': `Bearer ${token}` }),
         },
+        credentials: 'include',
       });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -279,6 +286,74 @@ class ApiClient {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to get user info',
+      };
+    }
+  }
+
+  async refreshSession(): Promise<ApiResponse<any>> {
+    try {
+      const configBaseUrl = client.getConfig().baseUrl || 'http://localhost:8000';
+      const baseUrl = configBaseUrl.endsWith('/') ? configBaseUrl.slice(0, -1) : configBaseUrl;
+      const response = await fetch(`${baseUrl}/api/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || errorData.message || `HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return { success: true, data };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to refresh session',
+      };
+    }
+  }
+
+  async logout(): Promise<ApiResponse<void>> {
+    try {
+      const configBaseUrl = client.getConfig().baseUrl || 'http://localhost:8000';
+      const baseUrl = configBaseUrl.endsWith('/') ? configBaseUrl.slice(0, -1) : configBaseUrl;
+      const response = await fetch(`${baseUrl}/api/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!response.ok && response.status !== 204) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || errorData.message || `HTTP error! status: ${response.status}`);
+      }
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to logout',
+      };
+    }
+  }
+
+  async createWebSocketTicket(token?: string): Promise<ApiResponse<{ ticket: string; expires_in: number }>> {
+    try {
+      const configBaseUrl = client.getConfig().baseUrl || 'http://localhost:8000';
+      const baseUrl = configBaseUrl.endsWith('/') ? configBaseUrl.slice(0, -1) : configBaseUrl;
+      const response = await fetch(`${baseUrl}/api/auth/ws-ticket`, {
+        method: 'POST',
+        headers: {
+          ...(token && { Authorization: `Bearer ${token}` }),
+        },
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || errorData.message || `HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return { success: true, data };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to create WebSocket ticket',
       };
     }
   }
@@ -1250,16 +1325,9 @@ const BACKEND_URL =
 export const apiClient = new ApiClient(BACKEND_URL);
 
 // Configure authentication token from localStorage
-const authDisabled = import.meta.env.VITE_VMCP_OSS_BUILD === 'true';
-if (authDisabled) {
-  // In OSS mode, use the local-token
-  apiClient.setToken('local-token');
-} else {
-  // In regular mode, use token from localStorage
-  const token = localStorage.getItem('access_token');
-  if (token) {
-    apiClient.setToken(token);
-  }
+const token = localStorage.getItem('access_token');
+if (token) {
+  apiClient.setToken(token);
 }
 
 // Export a helper to update the token

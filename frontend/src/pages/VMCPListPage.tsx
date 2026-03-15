@@ -232,7 +232,7 @@ export default function VMCPPage() {
 
     setImporting(true);
     try {
-      const accessToken = localStorage.getItem('access_token') || (import.meta.env.VITE_VMCP_OSS_BUILD === 'true' ? 'local-token' : undefined);
+      const accessToken = localStorage.getItem('access_token') || undefined;
       if (!accessToken) {
         toastError('Please log in to import vMCP configuration');
         return;
@@ -1161,4 +1161,3 @@ export default function VMCPPage() {
     </div>
   );
 }
-

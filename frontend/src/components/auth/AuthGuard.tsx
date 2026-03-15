@@ -11,20 +11,6 @@ interface AuthGuardProps {
 }
 
 export default function AuthGuard({ children }: AuthGuardProps) {
-  const authDisabled = import.meta.env.VITE_VMCP_OSS_BUILD === 'true';
-
-  // If auth is disabled (OSS build), bypass all auth checks
-  if (authDisabled) {
-    console.log('🔓 AuthGuard: Auth disabled for OSS build, bypassing auth checks');
-    return (
-      <AppProvider>
-        <MainLayout>
-          {children}
-        </MainLayout>
-      </AppProvider>
-    );
-  }
-
   const { user, loading, isAuthenticated } = useAuth();
   const router = useRouter();
   const { pathname } = useLocation();

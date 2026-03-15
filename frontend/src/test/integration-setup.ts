@@ -55,8 +55,8 @@ export function setupIntegrationTests() {
       )
     }
 
-    // Set up API client with test token (or local-token for OSS mode)
-    const token = localStorage.getItem('access_token') || 'local-token'
+    // Set up API client with any stored test token
+    const token = localStorage.getItem('access_token') || undefined
     updateApiToken(token)
   })
 
@@ -170,4 +170,3 @@ export async function createMCPServerForTest(serverData: {
   registerServerForCleanup(serverId)
   return serverId
 }
-

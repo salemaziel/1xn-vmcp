@@ -18,6 +18,7 @@ from starlette.requests import Request as StarletteRequest
 
 from vmcp.config import settings
 from vmcp.core.services import TokenInfo, get_jwt_service
+from vmcp.server.auth_service import resolve_request_token
 from vmcp.utilities.logging import get_logger
 
 # Setup centralized logging for middleware
@@ -32,19 +33,9 @@ templates = Jinja2Templates(directory=str(templates_dir))
 BASE_URL = settings.base_url
 
 
-def _inject_oss_dummy_token(request: Request) -> None:
-    """
-    Inject dummy Bearer token for OSS mode when Authorization header is missing.
-
-    This allows OSS version to work without requiring real authentication.
-    In Enterprise, this middleware can be overridden to skip token injection.
-    """
-    auth_header = request.headers.get("Authorization")
-    if not auth_header:
-        # Inject dummy token for OSS
-        dummy_token = f"Bearer {settings.dummy_user_token}"
-        request.headers.__dict__["_list"].append((b"authorization", dummy_token.encode()))
-        logger.debug(f"🔑 OSS: Injected dummy Bearer token for request to {request.url.path}")
+def _set_authorization_header(request: Request, token: str) -> None:
+    """Inject an authorization header for downstream handlers when needed."""
+    request.headers.__dict__["_list"].append((b"authorization", f"Bearer {token}".encode()))
 
 
 def render_unauthorized_template(
@@ -329,9 +320,6 @@ async def vmcp_routing_middleware(request: Request, call_next):
 
         logger.info(f"🔄 vMCP Middleware: {vmcp_username}/{vmcp_name}/vmcp -> /vmcp/mcp")
 
-        # Inject dummy Bearer token for OSS if missing
-        _inject_oss_dummy_token(request)
-
         # Set headers and forward to MCP endpoint
         request.headers.__dict__["_list"].append((b"vmcp-username", vmcp_username.encode()))
         request.headers.__dict__["_list"].append((b"vmcp-name", vmcp_name.encode()))
@@ -351,9 +339,6 @@ async def vmcp_routing_middleware(request: Request, call_next):
 
         logger.info(f"🔄 vMCP Middleware: {vmcp_name}/vmcp -> /vmcp/mcp")
 
-        # Inject dummy Bearer token for OSS if missing
-        _inject_oss_dummy_token(request)
-
         # Set headers and forward to MCP endpoint
         request.headers.__dict__["_list"].append((b"vmcp-name", vmcp_name.encode()))
 
@@ -371,9 +356,6 @@ async def vmcp_routing_middleware(request: Request, call_next):
             return await call_next(request)
 
         logger.info(f"🔄 vMCP Middleware: private/{vmcp_name}/vmcp -> /vmcp/mcp")
-
-        # Inject dummy Bearer token for OSS if missing
-        _inject_oss_dummy_token(request)
 
         # Set headers and forward to MCP endpoint
         request.headers.__dict__["_list"].append((b"vmcp-name", vmcp_name.encode()))
@@ -496,6 +478,15 @@ async def mcp_auth_middleware(request: Request, call_next):
         # MCP Authorization specification: "When authorization is required and not yet proven by the client,
         # servers MUST respond with HTTP 401 Unauthorized"
         auth_header = request.headers.get("Authorization")
+        resolved_token = None
+        if auth_header and auth_header.startswith("Bearer "):
+            resolved_token = auth_header.replace("Bearer", "", 1).strip()
+        elif not auth_header:
+            resolved_token = resolve_request_token(request)
+            if resolved_token:
+                _set_authorization_header(request, resolved_token)
+                auth_header = f"Bearer {resolved_token}"
+
         logger.debug(f"🔄 MCP AUTH: Authorization header: {auth_header}")
         vmcp_name = request.headers.get("vmcp-name")
         vmcp_username = request.headers.get("vmcp-username")
@@ -504,7 +495,7 @@ async def mcp_auth_middleware(request: Request, call_next):
 
         # Check if this is an SSE request (GET with text/event-stream Accept header)
         is_sse_request = request.method == "GET" and "text/event-stream" in request.headers.get("Accept", "")
-        if not auth_header:
+        if not auth_header or not resolved_token:
             logger.debug("❌ MCP AUTH: No Authorization header - returning HTTP 401")
             if vmcp_username:
                 resource_metadata = (
@@ -543,7 +534,7 @@ async def mcp_auth_middleware(request: Request, call_next):
             )
 
         # Extract token for validation
-        token = auth_header.replace("Bearer", "").strip()
+        token = resolved_token
 
         # Add detailed token logging
         logger.debug(
@@ -707,4 +698,3 @@ def register_middleware(app: FastAPI) -> None:
     app.middleware("http")(mcp_auth_middleware)
     app.middleware("http")(vmcp_routing_middleware)
     logger.info("✅ Middleware registered: mcp_auth_middleware, vmcp_routing_middleware (executes in reverse order)")
-

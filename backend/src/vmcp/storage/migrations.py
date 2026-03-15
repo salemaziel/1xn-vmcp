@@ -5,6 +5,7 @@ Handles schema changes while preserving existing data.
 """
 
 import logging
+import secrets
 from typing import List, Dict, Any
 from sqlalchemy import text, inspect
 from sqlalchemy.exc import OperationalError
@@ -86,6 +87,7 @@ class DatabaseMigrator:
         migrations = [
             (1, self._migration_001_add_blob_columns),
             (2, self._migration_002_fix_widget_id_constraint),
+            (3, self._migration_003_add_user_auth_columns),
         ]
         
         # Run pending migrations
@@ -248,6 +250,46 @@ class DatabaseMigrator:
                 
         except Exception as e:
             logger.error(f"Migration 002 failed: {e}")
+            raise
+
+    def _migration_003_add_user_auth_columns(self) -> None:
+        """Add authentication-related columns to the users table."""
+        try:
+            with self.engine.connect() as conn:
+                if 'users' not in self.inspector.get_table_names():
+                    logger.info("users table does not exist, skipping migration")
+                    return
+
+                existing_columns = [col['name'] for col in self.inspector.get_columns('users')]
+                is_postgres = "postgresql" in settings.database_url
+                boolean_type = "BOOLEAN"
+                true_value = "TRUE" if is_postgres else "1"
+
+                columns_to_add = [
+                    ("password_hash", "VARCHAR(512)", "NULL"),
+                    ("is_active", boolean_type, f"NOT NULL DEFAULT {true_value}"),
+                    ("is_verified", boolean_type, f"NOT NULL DEFAULT {true_value}"),
+                    ("session_nonce", "VARCHAR(64)", "NOT NULL DEFAULT ''"),
+                    ("last_login", "TIMESTAMP" if is_postgres else "DATETIME", "NULL"),
+                ]
+
+                for column_name, column_type, constraints in columns_to_add:
+                    if column_name not in existing_columns:
+                        logger.info(f"Adding column {column_name} to users table")
+                        conn.execute(text(f"ALTER TABLE users ADD COLUMN {column_name} {column_type} {constraints}"))
+
+                empty_nonce_sql = "session_nonce IS NULL OR session_nonce = ''"
+                result = conn.execute(text(f"SELECT id FROM users WHERE {empty_nonce_sql}"))
+                for row in result.fetchall():
+                    conn.execute(
+                        text("UPDATE users SET session_nonce = :session_nonce WHERE id = :user_id"),
+                        {"session_nonce": secrets.token_hex(16), "user_id": row[0]},
+                    )
+
+                conn.commit()
+                logger.info("Migration 003 completed: Added user authentication columns")
+        except Exception as e:
+            logger.error(f"Migration 003 failed: {e}")
             raise
 
 

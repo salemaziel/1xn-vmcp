@@ -83,6 +83,11 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
+    password_hash = Column(String(512), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True, server_default="1")
+    is_verified = Column(Boolean, nullable=False, default=True, server_default="1")
+    session_nonce = Column(String(64), nullable=False, default="", server_default="")
+    last_login = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 

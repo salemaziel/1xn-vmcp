@@ -448,7 +448,7 @@ function LoginForm() {
       });
 
       if (result.success) {
-        setSuccess('Account created successfully! Please check your email to verify your account.');
+        setSuccess('Account created successfully. You can now sign in.');
 
         // Switch to login mode after successful registration
         setTimeout(() => {

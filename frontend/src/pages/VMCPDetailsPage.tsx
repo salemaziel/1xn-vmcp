@@ -245,7 +245,7 @@ export default function VMCPDetailPage() {
     setShowChangesSummaryDialog(false);
     setSaving(true);
     try {
-      const accessToken = localStorage.getItem('access_token') || (import.meta.env.VITE_VMCP_OSS_BUILD === 'true' ? 'local-token' : undefined);
+      const accessToken = localStorage.getItem('access_token') || undefined;
       if (!accessToken) {
         showError('No access token available');
         return;
@@ -350,7 +350,7 @@ export default function VMCPDetailPage() {
 
     setForking(true);
     try {
-      const accessToken = localStorage.getItem('access_token') || (import.meta.env.VITE_VMCP_OSS_BUILD === 'true' ? 'local-token' : undefined);
+      const accessToken = localStorage.getItem('access_token') || undefined;
       if (!accessToken) {
         showError('No access token available');
         return;
@@ -399,7 +399,7 @@ export default function VMCPDetailPage() {
 
     setForking(true);
     try {
-      const accessToken = localStorage.getItem('access_token') || (import.meta.env.VITE_VMCP_OSS_BUILD === 'true' ? 'local-token' : undefined);
+      const accessToken = localStorage.getItem('access_token') || undefined;
       if (!accessToken) {
         showError('No access token available');
         return;
