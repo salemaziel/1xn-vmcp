@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     auth_cookie_domain: Optional[str] = Field(default=None, description="Optional cookie domain override")
     allow_self_registration: bool = Field(default=True, description="Allow local username/password registration")
     trusted_proxies: str = Field(default="127.0.0.1", description="Trusted proxy IPs/hosts or *")
-    allowed_hosts: list[str] = Field(default=["*"], description="Allowed host headers")
+    allowed_hosts: list[str] = Field(default=["localhost", "127.0.0.1"], description="Allowed host headers")
 
     # Storage
     storage_path: Path = Field(

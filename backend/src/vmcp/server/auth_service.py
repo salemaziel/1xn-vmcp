@@ -24,6 +24,9 @@ from vmcp.storage.models import User
 
 ACCESS_COOKIE_NAME = "vmcp_access_token"
 REFRESH_COOKIE_NAME = "vmcp_refresh_token"
+SCRYPT_N = 2**14
+SCRYPT_R = 8
+SCRYPT_P = 1
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
@@ -79,10 +82,13 @@ class AuthTokens:
 def hash_password(password: str) -> str:
     """Hash a password using scrypt with a random salt."""
     salt = secrets.token_bytes(16)
-    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**15, r=8, p=1)
-    return "scrypt$32768$8$1$%s$%s" % (
-        base64.b64encode(salt).decode("ascii"),
-        base64.b64encode(digest).decode("ascii"),
+    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P)
+    return "scrypt${n}${r}${p}${salt}${digest}".format(
+        n=SCRYPT_N,
+        r=SCRYPT_R,
+        p=SCRYPT_P,
+        salt=base64.b64encode(salt).decode("ascii"),
+        digest=base64.b64encode(digest).decode("ascii"),
     )
 
 
@@ -273,6 +279,34 @@ def rotate_session_nonce(user: User) -> None:
     user.session_nonce = secrets.token_hex(16)
 
 
+def get_user_by_id(user_id: int) -> User:
+    """Lookup a user by id."""
+    from vmcp.storage.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        db.expunge(user)
+        return user
+    finally:
+        db.close()
+
+
+def get_request_token_info(request: Request) -> TokenInfo:
+    """Extract and normalize the current request token."""
+    token = resolve_request_token(request)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authentication token")
+
+    jwt_service = get_jwt_service()
+    try:
+        return get_normalized_token_info(jwt_service, token)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+
 @router.post("/register", response_model=AuthUserResponse, status_code=status.HTTP_201_CREATED)
 async def register_local_user(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthUserResponse:
     """Register a new local username/password user."""
@@ -296,7 +330,7 @@ async def register_local_user(payload: RegisterRequest, db: Session = Depends(ge
         username=normalized_username,
         email=normalized_email,
         first_name=first_name,
-        last_name=last_name or "User",
+        last_name=last_name or "",
         password_hash=hash_password(payload.password),
         is_active=True,
         is_verified=True,
@@ -396,34 +430,6 @@ async def create_websocket_ticket(token_info: TokenInfo = Depends(get_request_to
         expires_in=settings.websocket_ticket_ttl_seconds,
     )
     return WebSocketTicketResponse(ticket=ticket, expires_in=settings.websocket_ticket_ttl_seconds)
-
-
-def get_user_by_id(user_id: int) -> User:
-    """Lookup a user by id."""
-    from vmcp.storage.database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if user is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-        db.expunge(user)
-        return user
-    finally:
-        db.close()
-
-
-def get_request_token_info(request: Request) -> TokenInfo:
-    """Extract and normalize the current request token."""
-    token = resolve_request_token(request)
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authentication token")
-
-    jwt_service = get_jwt_service()
-    try:
-        return get_normalized_token_info(jwt_service, token)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
 
 __all__ = [
