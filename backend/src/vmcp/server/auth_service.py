@@ -279,21 +279,6 @@ def rotate_session_nonce(user: User) -> None:
     user.session_nonce = secrets.token_hex(16)
 
 
-def get_user_by_id(user_id: int) -> User:
-    """Lookup a user by id."""
-    from vmcp.storage.database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if user is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-        db.expunge(user)
-        return user
-    finally:
-        db.close()
-
-
 def get_request_token_info(request: Request) -> TokenInfo:
     """Extract and normalize the current request token."""
     token = resolve_request_token(request)
@@ -410,16 +395,26 @@ async def logout_local_user(
 
 
 @router.get("/userinfo", response_model=AuthUserResponse)
-async def get_userinfo(token_info: TokenInfo = Depends(get_request_token_info)) -> AuthUserResponse:
+async def get_userinfo(
+    token_info: TokenInfo = Depends(get_request_token_info),
+    db: Session = Depends(get_db),
+) -> AuthUserResponse:
     """Return the currently authenticated user."""
-    user = get_user_by_id(int(token_info.user_id))
+    user = db.query(User).filter(User.id == int(token_info.user_id)).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user_to_response(user)
 
 
 @router.post("/auth/ws-ticket", response_model=WebSocketTicketResponse)
-async def create_websocket_ticket(token_info: TokenInfo = Depends(get_request_token_info)) -> WebSocketTicketResponse:
+async def create_websocket_ticket(
+    token_info: TokenInfo = Depends(get_request_token_info),
+    db: Session = Depends(get_db),
+) -> WebSocketTicketResponse:
     """Create a short-lived ticket suitable for browser WebSocket/MCP upgrades."""
-    user = get_user_by_id(int(token_info.user_id))
+    user = db.query(User).filter(User.id == int(token_info.user_id)).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     jwt_service = get_jwt_service()
     ticket = jwt_service.create_token(
         user.id,

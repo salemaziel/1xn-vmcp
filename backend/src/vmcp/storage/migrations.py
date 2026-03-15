@@ -280,10 +280,14 @@ class DatabaseMigrator:
 
                 empty_nonce_sql = "session_nonce IS NULL OR session_nonce = ''"
                 result = conn.execute(text(f"SELECT id FROM users WHERE {empty_nonce_sql}"))
-                for row in result.fetchall():
+                updates = [
+                    {"session_nonce": secrets.token_hex(16), "user_id": row[0]}
+                    for row in result.fetchall()
+                ]
+                if updates:
                     conn.execute(
                         text("UPDATE users SET session_nonce = :session_nonce WHERE id = :user_id"),
-                        {"session_nonce": secrets.token_hex(16), "user_id": row[0]},
+                        updates,
                     )
 
                 conn.commit()
