@@ -65,8 +65,13 @@ function LoginForm() {
 
   console.log('🚀 LoginForm initialized - OAuth flow:', { isOAuthFlow, clientId, redirectUri, vmcpName, vmcpUsername, registerMode, mode });
 
-  const { signInWithGoogle, loading: googleLoading } = useGoogleAuth();
+  const { signInWithGoogle, signInWithOidc, loading: googleLoading } = useGoogleAuth();
   const { login, user, isAuthenticated } = useAuth();
+  const [oauthProviders, setOAuthProviders] = useState({
+    google: false,
+    oidc: false,
+    oidcDisplayName: 'Enterprise SSO',
+  });
 
   // Register validation functions
   const validateUsername = (username: string) => {
@@ -187,6 +192,33 @@ function LoginForm() {
       handleAuthenticatedOAuthFlow();
     }
   }, [user, isAuthenticated, isOAuthFlow]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadProviders = async () => {
+      const result = await apiClient.getOAuthProviders();
+      if (!cancelled && result.success && result.data) {
+        const providerMap = result.data.providers.reduce(
+          (acc, provider) => {
+            if (provider.id === 'google') {
+              acc.google = provider.enabled;
+            }
+            if (provider.id === 'oidc') {
+              acc.oidc = provider.enabled;
+              acc.oidcDisplayName = provider.display_name;
+            }
+            return acc;
+          },
+          { google: false, oidc: false, oidcDisplayName: 'Enterprise SSO' }
+        );
+        setOAuthProviders(providerMap);
+      }
+    };
+    loadProviders().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Note: OAuth callback redirect is handled in auth-context.tsx after token storage
 
@@ -391,26 +423,23 @@ function LoginForm() {
 
   const handleGoogleSignIn = async () => {
     try {
-      if (isOAuthFlow) {
-        // OAuth flow with Google
-        const oauthParams = new URLSearchParams({
-          provider: 'google',
-          web_client_url: redirectUri || '',
-          client_id: clientId || 'unknown-mcp-client',
-          oauth_flow: 'true',
-          auth_mode: 'signin',
-          original_state: state || '',
-          vmcp_name: vmcpName || '',
-          vmcp_username: vmcpUsername || ''
-        });
-
-        await signInWithGoogle(false, redirectUri, undefined, oauthParams);  
-      } else {
-        // Standard Google sign-in
-        await signInWithGoogle(false);
-      }
+      const returnPath = isOAuthFlow
+        ? `${window.location.pathname}${window.location.search}`
+        : '/app/oauth/callback/success';
+      await signInWithGoogle(false, returnPath);
     } catch (error) {
       setError('Google sign-in failed. Please try again.');
+    }
+  };
+
+  const handleOidcSignIn = async () => {
+    try {
+      const returnPath = isOAuthFlow
+        ? `${window.location.pathname}${window.location.search}`
+        : '/app/oauth/callback/success';
+      await signInWithOidc(false, returnPath);
+    } catch (error) {
+      setError(`${oauthProviders.oidcDisplayName} sign-in failed. Please try again.`);
     }
   };
 
@@ -448,7 +477,7 @@ function LoginForm() {
       });
 
       if (result.success) {
-        setSuccess('Account created successfully! Please check your email to verify your account.');
+        setSuccess('Account created successfully. You can now sign in.');
 
         // Switch to login mode after successful registration
         setTimeout(() => {
@@ -478,30 +507,32 @@ function LoginForm() {
     }
 
     try {
-      // Store username for OAuth callback
-      localStorage.setItem('google_signup_username', formData.username);
-
-      if (isOAuthFlow) {
-        // OAuth flow with Google sign-up
-        const oauthParams = new URLSearchParams({
-          provider: 'google',
-          web_client_url: redirectUri || '',
-          client_id: clientId || 'unknown-mcp-client',
-          oauth_flow: 'true',
-          auth_mode: 'signup',
-          original_state: state || '',
-          vmcp_name: vmcpName || '',
-          vmcp_username: vmcpUsername || ''
-        });
-
-        await signInWithGoogle(true, redirectUri, formData.username, oauthParams);
-
-      } else {
-        // Standard Google sign-up
-        await signInWithGoogle(true, undefined, formData.username, undefined);
-      }
+      const returnPath = isOAuthFlow
+        ? `${window.location.pathname}${window.location.search}`
+        : '/app/oauth/callback/success';
+      await signInWithGoogle(true, returnPath, formData.username);
     } catch (err) {
       setError('Google sign-up failed. Please try again.');
+    }
+  };
+
+  const handleOidcSignUp = async () => {
+    if (!formData.username.trim()) {
+      setError(`Username is required for ${oauthProviders.oidcDisplayName} sign-up`);
+      return;
+    }
+
+    if (!validateUsername(formData.username)) {
+      return;
+    }
+
+    try {
+      const returnPath = isOAuthFlow
+        ? `${window.location.pathname}${window.location.search}`
+        : '/app/oauth/callback/success';
+      await signInWithOidc(true, returnPath, formData.username);
+    } catch (err) {
+      setError(`${oauthProviders.oidcDisplayName} sign-up failed. Please try again.`);
     }
   };
 
@@ -748,49 +779,67 @@ function LoginForm() {
               {/* Register Form */}
               {mode === 'register' && !(isOAuthFlow && user && isAuthenticated) && (
                 <div className="space-y-6">
-                  {/* Quick Google Sign-up Section */}
-                  <div className="space-y-4">
-                    <div>
-                      <label htmlFor="quick-username" className="block text-sm font-medium text-foreground mb-2">
-                        Username *
-                      </label>
-                      <Input
-                        id="quick-username"
-                        type="text"
-                        value={formData.username}
-                        onChange={(e) => handleRegisterChange('username', e.target.value)}
-                        placeholder="Enter your username"
-                        required
-                        autoComplete="username"
-                        className={usernameError ? 'border-red-500' : ''}
-                      />
-                      {usernameError && (
-                        <p className="mt-1 text-xs text-red-500">{usernameError}</p>
-                      )}
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        3-50 characters, letters, numbers, and underscores only
-                      </p>
-                    </div>
+                  {(oauthProviders.google || oauthProviders.oidc) && (
+                    <div className="space-y-4">
+                      <div>
+                        <label htmlFor="quick-username" className="block text-sm font-medium text-foreground mb-2">
+                          Username *
+                        </label>
+                        <Input
+                          id="quick-username"
+                          type="text"
+                          value={formData.username}
+                          onChange={(e) => handleRegisterChange('username', e.target.value)}
+                          placeholder="Enter your username"
+                          required
+                          autoComplete="username"
+                          className={usernameError ? 'border-red-500' : ''}
+                        />
+                        {usernameError && (
+                          <p className="mt-1 text-xs text-red-500">{usernameError}</p>
+                        )}
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          3-50 characters, letters, numbers, and underscores only
+                        </p>
+                      </div>
 
-                    <GoogleAuthButton
-                      loading={googleLoading}
-                      onClick={handleGoogleSignUp}
-                      mode="register"
-                      disabled={!formData.username.trim() || !!usernameError}
-                    />
-                  </div>
+                      <div className="space-y-3">
+                        {oauthProviders.google && (
+                          <GoogleAuthButton
+                            loading={googleLoading}
+                            onClick={handleGoogleSignUp}
+                            mode="register"
+                            disabled={!formData.username.trim() || !!usernameError}
+                          />
+                        )}
+                        {oauthProviders.oidc && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleOidcSignUp}
+                            disabled={!formData.username.trim() || !!usernameError || googleLoading}
+                            className="w-full bg-background text-foreground hover:bg-muted border-border hover:border-muted-foreground font-medium py-3 px-6 rounded-lg shadow-sm transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                          >
+                            Continue with {oauthProviders.oidcDisplayName}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Divider */}
-                  <div className="my-6">
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-border/30"></div>
-                      </div>
-                      <div className="relative flex justify-center text-sm">
-                        <span className="px-3 bg-card/50 text-muted-foreground font-medium">or</span>
+                  {(oauthProviders.google || oauthProviders.oidc) && (
+                    <div className="my-6">
+                      <div className="relative">
+                        <div className="absolute inset-0 flex items-center">
+                          <div className="w-full border-t border-border/30"></div>
+                        </div>
+                        <div className="relative flex justify-center text-sm">
+                          <span className="px-3 bg-card/50 text-muted-foreground font-medium">or</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Full Registration Form */}
                   <form onSubmit={handleRegisterSubmit} className="space-y-6">
@@ -922,7 +971,7 @@ function LoginForm() {
               )}
 
               {/* Social Login Section - only for login mode */}
-              {mode === 'login' && !(isOAuthFlow && user && isAuthenticated) && (
+              {mode === 'login' && !(isOAuthFlow && user && isAuthenticated) && (oauthProviders.google || oauthProviders.oidc) && (
                 <div className="mt-6">
                   <div className="relative">
                     <div className="absolute inset-0 flex items-center">
@@ -933,12 +982,25 @@ function LoginForm() {
                     </div>
                   </div>
 
-                  <div className="mt-6">
-                    <GoogleAuthButton
-                      loading={googleLoading}
-                      onClick={handleGoogleSignIn}
-                      mode="login"
-                    />
+                  <div className="mt-6 space-y-3">
+                    {oauthProviders.google && (
+                      <GoogleAuthButton
+                        loading={googleLoading}
+                        onClick={handleGoogleSignIn}
+                        mode="login"
+                      />
+                    )}
+                    {oauthProviders.oidc && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleOidcSignIn}
+                        disabled={googleLoading}
+                        className="w-full bg-background text-foreground hover:bg-muted border-border hover:border-muted-foreground font-medium py-3 px-6 rounded-lg shadow-sm transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                      >
+                        Continue with {oauthProviders.oidcDisplayName}
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}

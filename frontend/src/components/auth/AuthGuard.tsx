@@ -11,20 +11,6 @@ interface AuthGuardProps {
 }
 
 export default function AuthGuard({ children }: AuthGuardProps) {
-  const authDisabled = import.meta.env.VITE_VMCP_OSS_BUILD === 'true';
-
-  // If auth is disabled (OSS build), bypass all auth checks
-  if (authDisabled) {
-    console.log('🔓 AuthGuard: Auth disabled for OSS build, bypassing auth checks');
-    return (
-      <AppProvider>
-        <MainLayout>
-          {children}
-        </MainLayout>
-      </AppProvider>
-    );
-  }
-
   const { user, loading, isAuthenticated } = useAuth();
   const router = useRouter();
   const { pathname } = useLocation();
@@ -35,7 +21,7 @@ export default function AuthGuard({ children }: AuthGuardProps) {
   console.log('🔒 AuthGuard initialized');
 
   // Define public pages that don't require authentication
-  const publicPages = ['/login'];
+  const publicPages = ['/login', '/oauth/callback/success'];
   
   // Check if current page is an OAuth setup page (dynamic route)
   const isOAuthSetupPage = pathname.startsWith('/oauth_setup/') || isVmcpOauth
@@ -52,8 +38,9 @@ export default function AuthGuard({ children }: AuthGuardProps) {
         return;
       }
       
-      // Check if we're processing OAuth callback (has access_token in URL)
-      const isProcessingOAuth = urlParams.has('access_token') && urlParams.has('refresh_token');
+      // OAuth/OIDC login callbacks now complete server-side and land on this
+      // public frontend route without tokens in the URL.
+      const isProcessingOAuth = pathname === '/oauth/callback/success';
       
       if (!isAuthenticated && !isPublicPage) {
         // Redirect to login if not authenticated and trying to access protected page

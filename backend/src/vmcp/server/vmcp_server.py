@@ -11,17 +11,22 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from vmcp.config import settings
 from vmcp.mcps.oauth_handler import router as oauth_handler_router
 from vmcp.mcps.router_typesafe import router as mcp_router
+from vmcp.server.auth_service import router as auth_router
+from vmcp.server.oauth_service import router as oauth_login_router
 from vmcp.server.middleware import register_middleware
 from vmcp.server.vmcp_mcp_server import VMCPServer
 from vmcp.storage.blob_router import router as blob_router
+from vmcp.storage.dummy_user import UserContext, get_user_context
 from vmcp.utilities.logging import get_logger
 from vmcp.utilities.tracing import add_tracing_middleware
 from vmcp.vmcps.router_typesafe import router as vmcp_router
@@ -119,10 +124,13 @@ app = FastAPI(
 
 app.state.vmcp_server = vmcp
 
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.trusted_proxies)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -186,7 +194,7 @@ async def health():
 
 
 @app.get("/api/config")
-async def get_config():
+async def get_config(user_context: UserContext = Depends(get_user_context)):
     """Get server configuration including base URL"""
     return {
         "base_url": settings.base_url,
@@ -203,6 +211,8 @@ async def get_config():
 
 # Mount the API routes (OSS version - minimal routers)
 logger.info("[VMCPApiServer] Mounting API routes...")
+app.include_router(auth_router)
+app.include_router(oauth_login_router)
 app.include_router(mcp_router, prefix="/api")
 app.include_router(vmcp_router, prefix="/api")
 app.include_router(oauth_handler_router, prefix="/api")

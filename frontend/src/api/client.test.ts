@@ -303,6 +303,7 @@ describe('ApiClient', () => {
           expect.objectContaining({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify(loginRequest),
           })
         )
@@ -375,6 +376,108 @@ describe('ApiClient', () => {
           'http://localhost:8000/api/userinfo',
           expect.objectContaining({
             method: 'GET',
+            credentials: 'include',
+            headers: {
+              Authorization: 'Bearer test-token-123',
+            },
+          })
+        )
+      })
+
+      it('should request user info with cookies when no token is provided', async () => {
+        const mockUser = {
+          id: 'user-1',
+          email: 'test@example.com',
+          username: 'testuser',
+          full_name: 'Test User',
+        }
+
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          json: async () => mockUser,
+        } as Response)
+
+        const result = await apiClient.getUserInfo()
+
+        expect(result.success).toBe(true)
+        expect(fetch).toHaveBeenCalledWith(
+          'http://localhost:8000/api/userinfo',
+          expect.objectContaining({
+            method: 'GET',
+            credentials: 'include',
+            headers: {},
+          })
+        )
+      })
+    })
+
+    describe('refreshSession', () => {
+      it('should request a refresh using cookies', async () => {
+        const mockResponse = {
+          access_token: 'new-token',
+          refresh_token: 'new-refresh',
+          token_type: 'bearer',
+          expires_in: 900,
+          user: { id: 'user-1', email: 'test@example.com', username: 'testuser' },
+        }
+
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          json: async () => mockResponse,
+        } as Response)
+
+        const result = await apiClient.refreshSession()
+
+        expect(result.success).toBe(true)
+        expect(result.data).toEqual(mockResponse)
+        expect(fetch).toHaveBeenCalledWith(
+          'http://localhost:8000/api/refresh',
+          expect.objectContaining({
+            method: 'POST',
+            credentials: 'include',
+          })
+        )
+      })
+    })
+
+    describe('logout', () => {
+      it('should clear server-side session cookies', async () => {
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          status: 204,
+        } as Response)
+
+        const result = await apiClient.logout()
+
+        expect(result.success).toBe(true)
+        expect(fetch).toHaveBeenCalledWith(
+          'http://localhost:8000/api/logout',
+          expect.objectContaining({
+            method: 'POST',
+            credentials: 'include',
+          })
+        )
+      })
+    })
+
+    describe('createWebSocketTicket', () => {
+      it('should request a short-lived websocket ticket', async () => {
+        const mockResponse = { ticket: 'ticket-123', expires_in: 30 }
+
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          json: async () => mockResponse,
+        } as Response)
+
+        const result = await apiClient.createWebSocketTicket('test-token-123')
+
+        expect(result.success).toBe(true)
+        expect(result.data).toEqual(mockResponse)
+        expect(fetch).toHaveBeenCalledWith(
+          'http://localhost:8000/api/auth/ws-ticket',
+          expect.objectContaining({
+            method: 'POST',
+            credentials: 'include',
             headers: {
               Authorization: 'Bearer test-token-123',
             },
@@ -383,5 +486,39 @@ describe('ApiClient', () => {
       })
     })
   })
-})
 
+  describe('OAuth Authentication', () => {
+    it('should fetch enabled OAuth providers', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: [
+            { id: 'google', display_name: 'Google', enabled: true },
+            { id: 'oidc', display_name: 'Enterprise SSO', enabled: false },
+          ],
+        }),
+      } as any)
+
+      const result = await apiClient.getOAuthProviders()
+
+      expect(result.success).toBe(true)
+      expect(result.data?.providers[0].id).toBe('google')
+      expect(fetch).toHaveBeenCalledWith('http://localhost:8000/api/auth/oauth/providers', {
+        method: 'GET',
+        credentials: 'include',
+      })
+    })
+
+    it('should build OAuth start URLs with safe query parameters', () => {
+      const url = apiClient.buildOAuthStartUrl('google', {
+        mode: 'register',
+        username: 'alice_user',
+        returnTo: '/app/oauth/callback/success',
+      })
+
+      expect(url).toBe(
+        'http://localhost:8000/api/auth/oauth/google/start?mode=register&username=alice_user&return_to=%2Fapp%2Foauth%2Fcallback%2Fsuccess'
+      )
+    })
+  })
+})

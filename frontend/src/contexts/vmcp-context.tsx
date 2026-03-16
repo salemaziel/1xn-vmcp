@@ -10,17 +10,12 @@ import { VMCPConfig, VMCPRegistryConfig } from '@/types/vmcp';
 
 // Helper function to get the appropriate token for API calls
 const getApiToken = (): string => {
-  const authDisabled = import.meta.env.VITE_VMCP_OSS_BUILD === 'true';
   const storedToken = localStorage.getItem('access_token');
   
   if (storedToken) {
     return storedToken;
   }
-  
-  if (authDisabled) {
-    return 'local-token'; // Use dummy token for local OSS deployment
-  }
-  
+
   throw new Error('No access token available');
 };
 
@@ -433,4 +428,3 @@ export function useVMCPInitialized() {
   const { initialized } = useVMCP();
   return initialized;
 }
-

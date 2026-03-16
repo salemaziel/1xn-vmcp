@@ -1,9 +1,12 @@
 
 import { useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/auth-context';
 
 export default function OAuthCallbackSuccessPage() {
   const { loading, error } = useAuth();
+  const [searchParams] = useSearchParams();
+  const provider = searchParams.get('provider');
 
   useEffect(() => {
     // The AuthProvider will automatically handle the OAuth callback
@@ -22,7 +25,7 @@ export default function OAuthCallbackSuccessPage() {
           <h2 className="text-xl font-semibold mb-2">OAuth Error</h2>
           <p className="text-gray-300 mb-4">{error}</p>
           <button
-            onClick={() => window.location.href = '/login'}
+            onClick={() => window.location.href = '/app/login'}
             className="bg-violet-500 hover:bg-violet-600 text-white px-4 py-2 rounded-lg transition-colors"
           >
             Return to Login
@@ -41,9 +44,11 @@ export default function OAuthCallbackSuccessPage() {
           </svg>
         </div>
         <h2 className="text-xl font-semibold mb-2">Authentication Successful</h2>
-        <p className="text-gray-300 mb-4">Setting up your session...</p>
+        <p className="text-gray-300 mb-4">
+          {provider ? `Completing your ${provider} sign-in...` : 'Setting up your session...'}
+        </p>
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-violet-500 border-t-transparent mx-auto"></div>
       </div>
     </div>
   );
-} 
+}

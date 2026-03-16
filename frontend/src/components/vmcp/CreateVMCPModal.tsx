@@ -41,7 +41,7 @@ export default function CreateVMCPModal({ isOpen, onClose, onSuccess }: CreateVM
     setLoading(true);
     
     try {
-      const accessToken = localStorage.getItem('access_token') || (import.meta.env.VITE_VMCP_OSS_BUILD === 'true' ? 'local-token' : undefined);
+      const accessToken = localStorage.getItem('access_token') || undefined;
       if (!accessToken) {
         toastError('Please log in to create vMCPs');
         return;

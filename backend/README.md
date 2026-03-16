@@ -241,14 +241,22 @@ logger.error("Error", exc_info=True)
 
 ### OSS Version
 
-The OSS version uses a **dummy user system** (single local user):
+The backend now uses a **local authentication system** for browser and REST/MCP
+access:
 
-- **No Authentication**: All requests use user_id=1
-- **Local Use**: Designed for single-user local deployments
+- **Local Auth**: Username/password login backed by the app database
+- **Federated Login**: Google OAuth2 and generic OIDC login for browser users
+- **JWTs**: Signed access, refresh, and short-lived MCP/WebSocket ticket tokens
+- **Cookies**: Browser refresh/session continuity uses `HttpOnly` cookies
+- **MCP Protection**: MCP requests require a valid bearer token, auth cookie, or
+  short-lived `ticket`
+
+For the implementation details, token lifecycle, environment variables, and
+deployment notes, see [authentication.md](./authentication.md).
 
 ### MCP Server Authentication
 
-vMCP supports authentication for **MCP servers** (not users):
+vMCP also supports authentication for **upstream MCP servers**:
 
 - **OAuth 2.0**: Full OAuth flow support
 - **Bearer Tokens**: API key authentication
@@ -298,4 +306,3 @@ MIT License - see [LICENSE](../LICENSE) file.
 - 📖 [Documentation](https://1xn.ai/docs)
 
 ---
-

@@ -1,10 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { useRouter } from '@/hooks/useRouter';
 import { apiClient } from '@/api/client';
 import type { User, LoginRequest } from '@/api/client';
-
-const authDisabled = import.meta.env.VITE_VMCP_OSS_BUILD === 'true'
 
 interface AuthState {
   user: User | null;
@@ -27,49 +25,9 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  // For OSS build with auth disabled, provide a mock auth context early
-  if(authDisabled) {
-    console.log("[AuthContext] Auth is disabled for OSS build - skipping all auth logic");
-
-    // Set a mock access token in localStorage for OSS build
-    if (!localStorage.getItem('access_token')) {
-      localStorage.setItem('access_token', 'local-token');
-      console.log("[AuthContext] Set local-token for OSS no-auth mode");
-    }
-
-    const mockUser: User = {
-      id: 'local-user',
-      email: 'user@local.vmcp',
-      username: 'local-user',
-      first_name: 'Local',
-      last_name: 'User',
-      full_name: 'Local User',
-      is_active: true,
-      is_verified: true,
-      last_login: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-    };
-
-    const mockValue: AuthContextType = {
-      user: mockUser,
-      loading: false,
-      error: null,
-      isAuthenticated: true,
-      login: async () => ({ success: false, error: 'Auth disabled in OSS build' }),
-      logout: async () => {},
-      refreshUser: async () => {},
-      handleOAuthCallback: async () => {},
-    };
-
-    return (
-      <AuthContext.Provider value={mockValue}>
-        {children}
-      </AuthContext.Provider>
-    );
-  }
-
   const router = useRouter();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const [authState, setAuthState] = useState<AuthState>({
     user: null,
     loading: true,
@@ -88,67 +46,56 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return;
     }
 
-    const accessToken = searchParams.get('access_token');
-    const refreshToken = searchParams.get('refresh_token');
-    const userId = searchParams.get('user_id');
-    const userEmail = searchParams.get('user_email');
-    const userName = searchParams.get('user_name');
-    const userPhoto = searchParams.get('user_photo');
+    const callbackError = searchParams.get('error');
+    if (callbackError) {
+      oauthProcessedRef.current = true;
+      setAuthState({
+        user: null,
+        loading: false,
+        error: callbackError.replace(/_/g, ' '),
+        isAuthenticated: false,
+      });
+      return;
+    }
 
-    if (accessToken && refreshToken && userId && userEmail) {
-      try {
-        // Mark as processed immediately using ref (not state)
-        oauthProcessedRef.current = true;
-        isRedirectingRef.current = true;
+    try {
+      oauthProcessedRef.current = true;
+      isRedirectingRef.current = true;
 
-        console.log('OAuth callback processing - storing tokens and user data');
-
-        // Store tokens
-        localStorage.setItem('access_token', accessToken);
-        localStorage.setItem('refresh_token', refreshToken);
-
-        // Create user object from OAuth data
-        const user: User = {
-          id: userId,
-          email: decodeURIComponent(userEmail),
-          username: undefined,
-          first_name: userName ? decodeURIComponent(userName).split(' ')[0] : '',
-          last_name: userName ? decodeURIComponent(userName).split(' ').slice(1).join(' ') : '',
-          full_name: userName ? decodeURIComponent(userName) : '',
-          is_active: true,
-          is_verified: true,
-          last_login: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-          photo_url: userPhoto ? decodeURIComponent(userPhoto) : undefined,
-        };
-
-        // Store user data
-        localStorage.setItem('user', JSON.stringify(user));
-
-        // Update state
-        setAuthState({
-          user,
-          loading: false,
-          error: null,
-          isAuthenticated: true,
-        });
-
-        console.log('OAuth callback successful - redirecting to /vmcp');
-        
-        // Redirect immediately without setTimeout
-        router.replace('/vmcp');
-
-      } catch (error) {
-        console.error('OAuth callback error:', error);
-        oauthProcessedRef.current = false;
-        isRedirectingRef.current = false;
-        setAuthState({
-          user: null,
-          loading: false,
-          error: 'Failed to process OAuth callback',
-          isAuthenticated: false,
-        });
+      const result = await apiClient.refreshSession();
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Failed to complete OAuth callback');
       }
+
+      const responseData = result.data as any;
+      const accessToken = responseData.access_token;
+      const user = responseData.user as User;
+
+      localStorage.setItem('access_token', accessToken);
+      localStorage.setItem('user', JSON.stringify(user));
+      apiClient.setToken(accessToken);
+
+      setAuthState({
+        user,
+        loading: false,
+        error: null,
+        isAuthenticated: true,
+      });
+
+      router.replace('/vmcp');
+    } catch (error) {
+      console.error('OAuth callback error:', error);
+      oauthProcessedRef.current = false;
+      isRedirectingRef.current = false;
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('user');
+      apiClient.setToken(undefined);
+      setAuthState({
+        user: null,
+        loading: false,
+        error: error instanceof Error ? error.message : 'Failed to process OAuth callback',
+        isAuthenticated: false,
+      });
     }
   }, [searchParams, router]);
 
@@ -157,17 +104,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     console.log('🔍 Checking authentication status...');
     const accessToken = localStorage.getItem('access_token');
     const userData = localStorage.getItem('user');
-
-    if (!accessToken) {
-      console.log('❌ No access token found, setting unauthenticated');
-      setAuthState({
-        user: null,
-        loading: false,
-        error: null,
-        isAuthenticated: false,
-      });
-      return;
-    }
 
     // If we have cached user data, use it temporarily
     if (userData) {
@@ -185,33 +121,56 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     try {
-      const result = await apiClient.getUserInfo(accessToken);
+      const result = accessToken
+        ? await apiClient.getUserInfo(accessToken)
+        : await apiClient.refreshSession();
       
       if (result.success && result.data) {
+        const responseData = result.data as any;
+        const user = responseData.user || responseData;
+        const nextAccessToken = responseData.access_token || accessToken;
+
+        if (nextAccessToken) {
+          localStorage.setItem('access_token', nextAccessToken);
+          apiClient.setToken(nextAccessToken);
+        }
         setAuthState({
-          user: result.data,
+          user,
           loading: false,
           error: null,
           isAuthenticated: true,
         });
-        localStorage.setItem('user', JSON.stringify(result.data));
+        localStorage.setItem('user', JSON.stringify(user));
       } else {
-        // Token is invalid, clear everything
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
-        localStorage.removeItem('user');
-        setAuthState({
-          user: null,
-          loading: false,
-          error: 'Invalid token',
-          isAuthenticated: false,
-        });
+        const refreshResult = accessToken ? await apiClient.refreshSession() : result;
+        if (refreshResult.success && refreshResult.data) {
+          const refreshData = refreshResult.data as any;
+          localStorage.setItem('access_token', refreshData.access_token);
+          apiClient.setToken(refreshData.access_token);
+          localStorage.setItem('user', JSON.stringify(refreshData.user));
+          setAuthState({
+            user: refreshData.user,
+            loading: false,
+            error: null,
+            isAuthenticated: true,
+          });
+        } else {
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('user');
+          apiClient.setToken(undefined);
+          setAuthState({
+            user: null,
+            loading: false,
+            error: result.error || refreshResult.error || null,
+            isAuthenticated: false,
+          });
+        }
       }
     } catch (error) {
       console.error('Error verifying token:', error);
       localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
       localStorage.removeItem('user');
+      apiClient.setToken(undefined);
       setAuthState({
         user: null,
         loading: false,
@@ -239,8 +198,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const user = responseData.user || responseData.user;
         
         localStorage.setItem('access_token', tokens.access_token);
-        localStorage.setItem('refresh_token', tokens.refresh_token);
         localStorage.setItem('user', JSON.stringify(user));
+        apiClient.setToken(tokens.access_token);
         
         setAuthState({
           user: user,
@@ -263,9 +222,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Logout function
   const logout = useCallback(async () => {
+    await apiClient.logout().catch(() => undefined);
     localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
     localStorage.removeItem('user');
+    apiClient.setToken(undefined);
     
     setAuthState({
       user: null,
@@ -284,9 +244,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Handle OAuth callback on mount - ONLY ONCE
   useEffect(() => {
-    const accessToken = searchParams.get('access_token');
-    const refreshToken = searchParams.get('refresh_token');
-    const isOAuthCallback = accessToken && refreshToken;
+    const isOAuthCallback = location.pathname === '/oauth/callback/success';
     
     // Only process if:
     // 1. We have OAuth params

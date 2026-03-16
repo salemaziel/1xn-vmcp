@@ -28,8 +28,7 @@ export default function DemoVMCPSection({ publicVMCPS }: DemoVMCPSectionProps) {
     setImporting(prev => ({ ...prev, [vmcpId]: true }));
     
     try {
-      const accessToken = localStorage.getItem('access_token') || 
-        (import.meta.env.VITE_VMCP_OSS_BUILD === 'true' ? 'local-token' : undefined);
+      const accessToken = localStorage.getItem('access_token') || undefined;
       
       if (!accessToken) {
         toastError('Please log in to import vMCP configuration');
@@ -294,4 +293,3 @@ export default function DemoVMCPSection({ publicVMCPS }: DemoVMCPSectionProps) {
     </div>
   );
 }
-

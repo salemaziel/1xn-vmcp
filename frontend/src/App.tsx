@@ -36,8 +36,6 @@ function LoadingFallback() {
 }
 
 function App() {
-  const authDisabled = import.meta.env.VITE_VMCP_OSS_BUILD === 'true';
-
   return (
     <ThemeProvider>
       <AuthProvider>
