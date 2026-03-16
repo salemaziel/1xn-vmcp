@@ -75,6 +75,12 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _coerce_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _is_secure_cookie(request: Request) -> bool:
     return settings.auth_cookie_secure or request.url.scheme == "https"
 
@@ -570,7 +576,7 @@ async def oauth_callback(
     if (
         state_record is None
         or state_record.used_at is not None
-        or state_record.expires_at.replace(tzinfo=timezone.utc) < _utcnow()
+        or _coerce_utc(state_record.expires_at) < _utcnow()
     ):
         return _redirect_with_error(request, return_to=default_return_to, error_code="oauth_invalid_state")
 
