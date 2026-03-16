@@ -245,6 +245,7 @@ The backend now uses a **local authentication system** for browser and REST/MCP
 access:
 
 - **Local Auth**: Username/password login backed by the app database
+- **Federated Login**: Google OAuth2 and generic OIDC login for browser users
 - **JWTs**: Signed access, refresh, and short-lived MCP/WebSocket ticket tokens
 - **Cookies**: Browser refresh/session continuity uses `HttpOnly` cookies
 - **MCP Protection**: MCP requests require a valid bearer token, auth cookie, or

@@ -72,6 +72,16 @@ export interface LoginResponse {
   user: User;
 }
 
+export interface OAuthProviderInfo {
+  id: string;
+  display_name: string;
+  enabled: boolean;
+}
+
+export interface OAuthProviderListResponse {
+  providers: OAuthProviderInfo[];
+}
+
 // Standard API response wrapper
 interface ApiResponse<T> {
   success: boolean;
@@ -331,6 +341,48 @@ class ApiClient {
         error: error instanceof Error ? error.message : 'Failed to logout',
       };
     }
+  }
+
+  async getOAuthProviders(): Promise<ApiResponse<OAuthProviderListResponse>> {
+    try {
+      const configBaseUrl = client.getConfig().baseUrl || 'http://localhost:8000';
+      const baseUrl = configBaseUrl.endsWith('/') ? configBaseUrl.slice(0, -1) : configBaseUrl;
+      const response = await fetch(`${baseUrl}/api/auth/oauth/providers`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || errorData.message || `HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return { success: true, data };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get OAuth providers',
+      };
+    }
+  }
+
+  buildOAuthStartUrl(
+    provider: string,
+    options?: { mode?: 'login' | 'register'; username?: string; returnTo?: string }
+  ): string {
+    const configBaseUrl = client.getConfig().baseUrl || 'http://localhost:8000';
+    const baseUrl = configBaseUrl.endsWith('/') ? configBaseUrl.slice(0, -1) : configBaseUrl;
+    const params = new URLSearchParams();
+    if (options?.mode) {
+      params.set('mode', options.mode);
+    }
+    if (options?.username) {
+      params.set('username', options.username);
+    }
+    if (options?.returnTo) {
+      params.set('return_to', options.returnTo);
+    }
+    const query = params.toString();
+    return `${baseUrl}/api/auth/oauth/${provider}/start${query ? `?${query}` : ''}`;
   }
 
   async createWebSocketTicket(token?: string): Promise<ApiResponse<{ ticket: string; expires_in: number }>> {

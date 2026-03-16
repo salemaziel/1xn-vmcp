@@ -22,6 +22,7 @@ from vmcp.config import settings
 from vmcp.mcps.oauth_handler import router as oauth_handler_router
 from vmcp.mcps.router_typesafe import router as mcp_router
 from vmcp.server.auth_service import router as auth_router
+from vmcp.server.oauth_service import router as oauth_login_router
 from vmcp.server.middleware import register_middleware
 from vmcp.server.vmcp_mcp_server import VMCPServer
 from vmcp.storage.blob_router import router as blob_router
@@ -211,6 +212,7 @@ async def get_config(user_context: UserContext = Depends(get_user_context)):
 # Mount the API routes (OSS version - minimal routers)
 logger.info("[VMCPApiServer] Mounting API routes...")
 app.include_router(auth_router)
+app.include_router(oauth_login_router)
 app.include_router(mcp_router, prefix="/api")
 app.include_router(vmcp_router, prefix="/api")
 app.include_router(oauth_handler_router, prefix="/api")

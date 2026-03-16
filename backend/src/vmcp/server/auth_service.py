@@ -127,6 +127,13 @@ def split_full_name(full_name: Optional[str]) -> tuple[str, str]:
 
 def user_to_response(user: User) -> AuthUserResponse:
     """Convert a user model into the frontend response shape."""
+    photo_url = None
+    oauth_accounts = getattr(user, "oauth_accounts", None) or []
+    for oauth_account in oauth_accounts:
+        if getattr(oauth_account, "picture_url", None):
+            photo_url = oauth_account.picture_url
+            break
+
     return AuthUserResponse(
         id=str(user.id),
         email=user.email,
@@ -138,6 +145,7 @@ def user_to_response(user: User) -> AuthUserResponse:
         is_verified=bool(user.is_verified),
         last_login=user.last_login.isoformat() if user.last_login else None,
         created_at=user.created_at.isoformat(),
+        photo_url=photo_url,
     )
 
 

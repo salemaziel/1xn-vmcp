@@ -56,6 +56,23 @@ class Settings(BaseSettings):
     allow_self_registration: bool = Field(default=True, description="Allow local username/password registration")
     trusted_proxies: str = Field(default="127.0.0.1", description="Trusted proxy IPs/hosts or *")
     allowed_hosts: list[str] = Field(default=["localhost", "127.0.0.1"], description="Allowed host headers")
+    oauth_state_ttl_seconds: int = Field(default=600, description="OAuth login state lifetime in seconds")
+    oauth_callback_frontend_path: str = Field(
+        default="/app/oauth/callback/success",
+        description="Frontend path used after successful OAuth/OIDC login",
+    )
+    google_oauth_client_id: Optional[str] = Field(default=None, description="Google OAuth client ID")
+    google_oauth_client_secret: Optional[str] = Field(default=None, description="Google OAuth client secret")
+    google_oauth_discovery_url: str = Field(
+        default="https://accounts.google.com/.well-known/openid-configuration",
+        description="Google OIDC discovery document URL",
+    )
+    google_oauth_scope: str = Field(default="openid email profile", description="Google OAuth scopes")
+    oidc_client_id: Optional[str] = Field(default=None, description="Generic OIDC client ID")
+    oidc_client_secret: Optional[str] = Field(default=None, description="Generic OIDC client secret")
+    oidc_discovery_url: Optional[str] = Field(default=None, description="Generic OIDC discovery document URL")
+    oidc_scope: str = Field(default="openid email profile", description="Generic OIDC scopes")
+    oidc_provider_name: str = Field(default="Enterprise SSO", description="Display name for the generic OIDC login")
 
     # Storage
     storage_path: Path = Field(

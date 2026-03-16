@@ -486,4 +486,39 @@ describe('ApiClient', () => {
       })
     })
   })
+
+  describe('OAuth Authentication', () => {
+    it('should fetch enabled OAuth providers', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: [
+            { id: 'google', display_name: 'Google', enabled: true },
+            { id: 'oidc', display_name: 'Enterprise SSO', enabled: false },
+          ],
+        }),
+      } as any)
+
+      const result = await apiClient.getOAuthProviders()
+
+      expect(result.success).toBe(true)
+      expect(result.data?.providers[0].id).toBe('google')
+      expect(fetch).toHaveBeenCalledWith('http://localhost:8000/api/auth/oauth/providers', {
+        method: 'GET',
+        credentials: 'include',
+      })
+    })
+
+    it('should build OAuth start URLs with safe query parameters', () => {
+      const url = apiClient.buildOAuthStartUrl('google', {
+        mode: 'register',
+        username: 'alice_user',
+        returnTo: '/app/oauth/callback/success',
+      })
+
+      expect(url).toBe(
+        'http://localhost:8000/api/auth/oauth/google/start?mode=register&username=alice_user&return_to=%2Fapp%2Foauth%2Fcallback%2Fsuccess'
+      )
+    })
+  })
 })

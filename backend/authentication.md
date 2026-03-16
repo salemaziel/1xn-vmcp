@@ -1,7 +1,8 @@
 # Backend Authentication Notes
 
-This document summarizes the Stage 1 authentication implementation that replaced
-the previous dummy/mock auth path with a real local username/password flow.
+This document summarizes the authentication implementation that replaced the
+previous dummy/mock auth path with real local username/password auth in Stage 1
+and secure Google/OIDC login support in Stage 2.
 
 ## What Changed
 
@@ -15,8 +16,14 @@ operation. Instead, it now uses:
 - MCP middleware that accepts either a bearer token, an auth cookie, or a
   short-lived `ticket` query parameter
 
-Stage 1 is intentionally limited to **local auth only**. Google OAuth and
-broader OIDC provider support are still future work.
+The current auth model supports:
+
+- local username/password login
+- Google OAuth2 login
+- generic OpenID Connect login for enterprise IdPs
+
+The browser callback flow is handled entirely server-side so the app no longer
+needs to receive access or refresh tokens in the frontend callback URL.
 
 ## Primary Files
 
@@ -25,6 +32,12 @@ broader OIDC provider support are still future work.
   - password hashing and verification
   - cookie helpers
   - token resolution helpers
+- `backend/src/vmcp/server/oauth_service.py`
+  - Google and generic OIDC login flows
+  - PKCE + nonce generation
+  - server-side callback handling
+  - state-cookie and database-backed CSRF protection
+  - secure account resolution/linking
 - `backend/src/vmcp/storage/dummy_jwt.py`
   - now provides `LocalJWTService`
   - validates signed JWTs against the database and `session_nonce`
@@ -40,8 +53,10 @@ broader OIDC provider support are still future work.
   - protects `/api/config`
 - `backend/src/vmcp/storage/models.py`
   - adds auth fields to `users`
+  - stores linked OAuth accounts and login state records
 - `backend/src/vmcp/storage/migrations.py`
   - adds migration 003 for the new user auth fields
+  - adds migration 004 for OAuth account/state tables
 
 ## User Model Changes
 
@@ -55,6 +70,17 @@ The `users` table now includes:
 
 `session_nonce` is important because it allows server-side invalidation of all
 existing tokens for a user without maintaining a separate token blacklist.
+
+Stage 2 also adds:
+
+- `user_oauth_accounts`
+  - one row per linked provider identity
+  - identifies users by `(provider, issuer, subject)`
+  - stores email verification status and provider claims
+- `oauth_login_states`
+  - one row per in-flight browser login attempt
+  - stores hashed `state`, PKCE verifier, nonce, requested username, return path,
+    expiry, and single-use status
 
 ## Token Types
 
@@ -72,6 +98,10 @@ The backend currently issues three token types:
    - used when browser clients need to authenticate MCP/WebSocket style access
      but cannot send custom auth headers during the upgrade flow
 
+OAuth/OIDC logins ultimately mint the exact same local `access` and `refresh`
+tokens after the callback succeeds, so the rest of the application continues to
+use one unified session model.
+
 ## Browser Session Model
 
 The browser-facing flow is:
@@ -86,6 +116,31 @@ The browser-facing flow is:
 6. `POST /api/logout` rotates session state and clears cookies
 
 This means refresh credentials are no longer exposed to JavaScript storage.
+
+## OAuth / OIDC Browser Login Model
+
+The Stage 2 browser login flow is:
+
+1. frontend redirects the browser to `GET /api/auth/oauth/{provider}/start`
+2. backend loads provider metadata from discovery
+3. backend creates:
+   - a random `state`
+   - a PKCE `code_verifier` / `code_challenge`
+   - a random `nonce`
+4. backend stores the login attempt in `oauth_login_states`
+5. backend sets an `HttpOnly` `vmcp_oauth_state` cookie
+6. backend redirects the browser to Google or the configured OIDC provider
+7. provider redirects back to `GET /api/auth/oauth/{provider}/callback`
+8. backend validates:
+   - cookie `state` matches query `state`
+   - database state exists, is unused, and is not expired
+   - token exchange succeeds
+   - ID token signature is valid against provider JWKS
+   - ID token `nonce` matches the stored nonce
+9. backend resolves or links the local user account
+10. backend sets the normal local auth cookies and redirects back to the SPA
+
+No local auth token is placed in the callback URL.
 
 ## Auth Endpoints
 
@@ -119,6 +174,45 @@ Returns the authenticated user.
 
 Returns a short-lived `ws_ticket` JWT for MCP/WebSocket/browser-constrained
 clients.
+
+### `GET /api/auth/oauth/providers`
+
+Returns which interactive login providers are enabled for the frontend login
+page.
+
+### `GET /api/auth/oauth/google/start`
+
+Starts the Google login flow.
+
+### `GET /api/auth/oauth/google/callback`
+
+Handles the Google callback, creates/links the local user, sets session cookies,
+and redirects back to the SPA.
+
+### `GET /api/auth/oauth/oidc/start`
+
+Starts the generic OIDC login flow using the configured discovery document.
+
+### `GET /api/auth/oauth/oidc/callback`
+
+Handles the generic OIDC callback with the same cookie/state/nonce protections.
+
+## Account Resolution Rules
+
+Stage 2 intentionally uses conservative account-linking rules:
+
+- if `(provider, issuer, subject)` is already linked, sign in as that user
+- if no link exists but a local user with the same email exists:
+  - link automatically **only** when the provider explicitly reports
+    `email_verified=true`
+  - reject the login when the provider email is unverified or missing
+- if no user exists yet:
+  - create a new local user **only** when the provider email is verified
+  - generate a unique username from the requested username, provider username,
+    or email local-part
+
+This is important because auto-linking an unverified provider email could allow
+account takeover against a pre-existing local account.
 
 ## REST and MCP Authentication Resolution
 
@@ -170,6 +264,10 @@ The frontend auth context now assumes:
 - access token may exist in `localStorage`
 - refresh happens through cookies, not `localStorage`
 - logout must clear both local access-token state and server cookies
+- OAuth/OIDC callbacks land on `/app/oauth/callback/success`
+- the callback page calls `/api/refresh` to establish frontend auth state from
+  the server-set cookies
+- provider buttons are discovered from `/api/auth/oauth/providers`
 
 If a future agent reintroduces implicit `local-token` behavior in the frontend,
 that would bypass the Stage 1 security model and should be treated as a
@@ -189,17 +287,32 @@ At minimum, local auth needs:
 - `VMCP_ALLOW_SELF_REGISTRATION`
 - `VMCP_TRUSTED_PROXIES`
 - `VMCP_ALLOWED_HOSTS`
+- `VMCP_OAUTH_STATE_TTL_SECONDS`
+- `VMCP_OAUTH_CALLBACK_FRONTEND_PATH`
+- `VMCP_GOOGLE_OAUTH_CLIENT_ID`
+- `VMCP_GOOGLE_OAUTH_CLIENT_SECRET`
+- `VMCP_GOOGLE_OAUTH_DISCOVERY_URL`
+- `VMCP_GOOGLE_OAUTH_SCOPE`
+- `VMCP_OIDC_CLIENT_ID`
+- `VMCP_OIDC_CLIENT_SECRET`
+- `VMCP_OIDC_DISCOVERY_URL`
+- `VMCP_OIDC_SCOPE`
+- `VMCP_OIDC_PROVIDER_NAME`
 
 The database must also be configured normally through `VMCP_DATABASE_URL`.
 
 ## Focused Validation Commands
 
-These were the focused checks used while implementing Stage 1 auth:
+These were the focused checks used while implementing the current auth system:
 
 ```bash
 # Focused backend auth helper tests
 PYTHONPATH=/home/runner/work/1xn-vmcp/1xn-vmcp/backend/src \
 pytest --noconftest backend/tests/test_local_auth_service.py
+
+# Focused backend OAuth/OIDC tests
+PYTHONPATH=/home/runner/work/1xn-vmcp/1xn-vmcp/backend/src \
+pytest --noconftest backend/tests/test_oauth_service.py
 
 # Focused frontend API auth tests
 cd /home/runner/work/1xn-vmcp/1xn-vmcp/frontend
@@ -211,11 +324,10 @@ VITE_VMCP_OSS_BUILD=true npm run build
 
 ## Important Follow-Up Work
 
-Not part of Stage 1:
+Still not part of the current implementation:
 
-- external identity providers
-- Google OAuth for end-user login
-- general OIDC support
+- multiple generic OIDC providers at once
+- manual account-link / unlink UI inside the app
 - refresh-token rotation beyond `session_nonce` invalidation
 - dedicated auth UI for password reset / email verification
-
+- MFA / step-up auth policies

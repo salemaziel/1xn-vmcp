@@ -88,6 +88,7 @@ class DatabaseMigrator:
             (1, self._migration_001_add_blob_columns),
             (2, self._migration_002_fix_widget_id_constraint),
             (3, self._migration_003_add_user_auth_columns),
+            (4, self._migration_004_add_oauth_tables),
         ]
         
         # Run pending migrations
@@ -294,6 +295,82 @@ class DatabaseMigrator:
                 logger.info("Migration 003 completed: Added user authentication columns")
         except Exception as e:
             logger.error(f"Migration 003 failed: {e}")
+            raise
+
+    def _migration_004_add_oauth_tables(self) -> None:
+        """Add OAuth account link and login state tables."""
+        try:
+            with self.engine.connect() as conn:
+                is_postgres = "postgresql" in settings.database_url
+                boolean_default = "FALSE" if is_postgres else "0"
+                datetime_type = "TIMESTAMP" if is_postgres else "DATETIME"
+                integer_pk = "SERIAL PRIMARY KEY" if is_postgres else "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+                conn.execute(
+                    text(
+                        f"""
+                        CREATE TABLE IF NOT EXISTS user_oauth_accounts (
+                            id {integer_pk},
+                            user_id INTEGER NOT NULL,
+                            provider VARCHAR(50) NOT NULL,
+                            issuer VARCHAR(255) NOT NULL,
+                            subject VARCHAR(255) NOT NULL,
+                            email VARCHAR(255) NULL,
+                            email_verified BOOLEAN NOT NULL DEFAULT {boolean_default},
+                            picture_url VARCHAR(1024) NULL,
+                            claims_json TEXT NULL,
+                            last_login_at {datetime_type} NULL,
+                            created_at {datetime_type} DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                            updated_at {datetime_type} DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                            FOREIGN KEY(user_id) REFERENCES users(id)
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_user_oauth_account_unique_identity
+                        ON user_oauth_accounts (provider, issuer, subject)
+                        """
+                    )
+                )
+                conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS idx_user_oauth_accounts_user_id ON user_oauth_accounts (user_id)")
+                )
+                conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS idx_user_oauth_accounts_email ON user_oauth_accounts (email)")
+                )
+
+                conn.execute(
+                    text(
+                        f"""
+                        CREATE TABLE IF NOT EXISTS oauth_login_states (
+                            id {integer_pk},
+                            provider VARCHAR(50) NOT NULL,
+                            state_hash VARCHAR(64) NOT NULL,
+                            code_verifier VARCHAR(255) NOT NULL,
+                            nonce VARCHAR(255) NOT NULL,
+                            requested_username VARCHAR(50) NULL,
+                            return_to VARCHAR(1024) NOT NULL,
+                            created_at {datetime_type} DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                            expires_at {datetime_type} NOT NULL,
+                            used_at {datetime_type} NULL
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text("CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_login_states_state_hash ON oauth_login_states (state_hash)")
+                )
+                conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS idx_oauth_login_states_expires_at ON oauth_login_states (expires_at)")
+                )
+
+                conn.commit()
+                logger.info("Migration 004 completed: Added OAuth account and login state tables")
+        except Exception as e:
+            logger.error(f"Migration 004 failed: {e}")
             raise
 
 

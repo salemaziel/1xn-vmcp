@@ -70,12 +70,7 @@ class JSONType(TypeDecorator):
 
 
 class User(Base):
-    """
-    Dummy user model for OSS version.
-
-    In OSS, there's always a single local user. This simplifies the codebase
-    while keeping the API structure consistent for future auth extensions.
-    """
+    """User model for local and federated authentication."""
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -95,6 +90,7 @@ class User(Base):
     mcp_servers = relationship("MCPServer", back_populates="user", cascade="all, delete-orphan")
     vmcps = relationship("VMCP", back_populates="user", cascade="all, delete-orphan")
     vmcp_environments = relationship("VMCPEnvironment", back_populates="user", cascade="all, delete-orphan")
+    oauth_accounts = relationship("UserOAuthAccount", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, email='{self.email}')>"
@@ -142,6 +138,57 @@ class MCPServer(Base):
 
     def __repr__(self):
         return f"<MCPServer(id='{self.id}', server_id='{self.server_id}', name='{self.name}')>"
+
+
+class UserOAuthAccount(Base):
+    """Federated identity linked to a local user."""
+
+    __tablename__ = "user_oauth_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    provider = Column(String(50), nullable=False, index=True)
+    issuer = Column(String(255), nullable=False, index=True)
+    subject = Column(String(255), nullable=False, index=True)
+    email = Column(String(255), nullable=True, index=True)
+    email_verified = Column(Boolean, nullable=False, default=False, server_default="0")
+    picture_url = Column(String(1024), nullable=True)
+    claims_json = Column(JSONType, nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    user = relationship("User", back_populates="oauth_accounts")
+
+    __table_args__ = (
+        Index("idx_user_oauth_account_unique_identity", "provider", "issuer", "subject", unique=True),
+    )
+
+    def __repr__(self):
+        return (
+            f"<UserOAuthAccount(provider='{self.provider}', issuer='{self.issuer}', "
+            f"subject='{self.subject}', user_id={self.user_id})>"
+        )
+
+
+class OAuthLoginState(Base):
+    """Server-side OAuth/OIDC login state used for CSRF protection."""
+
+    __tablename__ = "oauth_login_states"
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider = Column(String(50), nullable=False, index=True)
+    state_hash = Column(String(64), nullable=False, unique=True, index=True)
+    code_verifier = Column(String(255), nullable=False)
+    nonce = Column(String(255), nullable=False)
+    requested_username = Column(String(50), nullable=True)
+    return_to = Column(String(1024), nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    used_at = Column(DateTime, nullable=True)
+
+    def __repr__(self):
+        return f"<OAuthLoginState(provider='{self.provider}', expires_at='{self.expires_at}')>"
 
 
 class VMCP(Base):
